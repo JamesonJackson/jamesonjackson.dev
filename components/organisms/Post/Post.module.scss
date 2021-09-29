@@ -1,0 +1,17 @@
+
+.container {
+  padding: 4em 6em;
+
+  @media(max-width: 600px) {
+    padding: 1em 2em;
+  }
+  
+  .article {
+    font-weight: 100;
+    font-size: 2em;
+
+    @media(max-width: 600px) {
+      font-size: 1.5em;
+    }
+  }
+}

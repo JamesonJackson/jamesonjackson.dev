@@ -2,7 +2,7 @@ import styles from './PostHeader.module.scss';
 
 export const PostHeader = ({ meta, isBlogPost }) => {
   return (
-    <div className={styles.container}>
+    <>
       <h1 className={styles.title}>
         {meta.title}
       </h1>
@@ -21,12 +21,11 @@ export const PostHeader = ({ meta, isBlogPost }) => {
         <span
           role='img'
           aria-label='one coffee'
-          className=""
         >
           ☕ {`${meta.readTime}min read`}
         </span>
       </div>
-    </div>
+    </>
   )
 }
 

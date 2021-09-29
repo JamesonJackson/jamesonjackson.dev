@@ -1,25 +1,25 @@
 import styles from './Navbar.module.scss'
-import Link from "next/link"
+import Link from 'next/link'
 
 function Navbar () {
   return (
     <nav className={styles.navbar}>
       <ul className="nav-items">
         <li className={styles['full-width']}>
-          <Link href="/">Jameson Jackson</Link>
+          <Link href="/">JAMESON JACKSON</Link>
         </li>
-        
-        <li>
-          <Link href="/About">About</Link>
+
+        {/* <li>
+          <Link href="/">twitter</Link>
         </li>
 
         <li>
-          <Link href="/blog">Blog</Link>
+          <Link href="/">linkedIn</Link>
         </li>
 
         <li>
-          <Link href="/Projects">Projects</Link>
-        </li>
+          <Link href="/">github</Link>
+        </li> */}
       </ul>
 
     </nav>
