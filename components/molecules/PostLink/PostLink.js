@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { PostHeader } from "../PostHeader/PostHeader";
+import Link from 'next/link';
+import { PostHeader } from '../PostHeader/PostHeader';
 
 export const PostLink = ({ post }) => {
   const {
