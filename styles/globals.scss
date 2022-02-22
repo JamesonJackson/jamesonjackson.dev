@@ -10,19 +10,29 @@
 
 html,
 body {
-  background-color: #222;
-  color: white;
+  width: 100%;
+  height: 100%;
+  color: #000000;
   padding: 0;
   margin: 0;
   font-family: 'Barlow Condensed', sans-serif;
   font-weight: 100;
 
+  #__next {
+    width: 100%;
+    height: 100%;
+    display:flex;
+    flex-direction: column;
+  }
+
   main {
     display: grid;
-    row-gap: 1em;
-    article {
-      text-align: center;
-    }
+    padding: 20px;
+    flex: 1;
+    align-content: flex-start;
+    gap: 20px;
+    justify-content: center;
+    overflow: auto;
   }
 }
 
