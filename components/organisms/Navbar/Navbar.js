@@ -1,27 +1,13 @@
 import styles from './Navbar.module.scss'
 import Link from 'next/link'
 
-function Navbar () {
+function Navbar ({title, subtitle}) {
   return (
     <nav className={styles.navbar}>
-      <ul className="nav-items">
-        <li className={styles['full-width']}>
-          <Link href="/">JAMESON JACKSON</Link>
-        </li>
-
-        {/* <li>
-          <Link href="/">twitter</Link>
-        </li>
-
-        <li>
-          <Link href="/">linkedIn</Link>
-        </li>
-
-        <li>
-          <Link href="/">github</Link>
-        </li> */}
-      </ul>
-
+      <Link href="/" passHref={true}>
+        <h1 className={styles.title}>{title}</h1>
+      </Link>
+      { subtitle && <p className={styles.subtitle}>{subtitle}</p> }
     </nav>
   )
 }
