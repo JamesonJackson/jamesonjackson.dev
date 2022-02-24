@@ -1,0 +1,249 @@
+import Post from '../../../components/organisms/Post/Post'
+
+export const meta = {
+  title: 'Node.js: A peek under the hood',
+  description: 'Exploring the internals of Node.js',
+  date: 'September 12, 2021',
+  readTime: 1
+}
+
+export default ({ children }) => <Post meta={meta}>{children}</Post>;
+
+When we fire up a Node.js program Node relies upon a collection of dependencies to run our JavaScript code. The two most important being V8 and libuv. V8 is an open source JavaScript engine created by Google, allowing JavaScript code to run outside of the browser. Libuv is another open source project written in C++ that gives Node access to the OS’s underlying file system, networking, and some levels of concurrency. We can think of Node as a series of wrappers/modules relaying our JavaScript to the C++ code that is running on our computer, allowing us to interact with the OS via libuv. 
+
+Let's start with a visualization and then look at this process via an example.
+
+-- image here --
+
+Let's say we want to improve security and hash passwords within our application. We pull in Node's crypto module in order to leverage the [pbkdf2](https://github.com/nodejs/node/blob/master/lib/internal/crypto/pbkdf2.js) hashing method. Looking at this function's code we notice a dependency of 
+
+ If we look closely, on line 5 we see that a portion of this method's functionality is being required from *internalBinding('crypto')*. What we are seeing here is Node linking its JS side to its C++ side.
+
+Let's follow the breadcrumbs a bit further and take a peek at the C++ file being passed to *internalBinding*, in our case [crypto](https://github.com/nodejs/node/blob/master/src/node_crypto.cc).
+
+At the top of this file we see a number of dependencies, but around line 50 things start to get interesting. As we enter the crypto namespace we begin to see a number of V8 types being used. Here, Node is leveraging V8 to act as an intermediary and convert our JavaScript concepts into C++ equivalents. This allows the C++ implementation of our [pbkdf2](https://github.com/nodejs/node/blob/master/src/node_crypto.cc) function to pick up where the JavaScript side left off, but now with access to the underlying operating system via libuv. Pretty cool, right? 
+
+Searching for *uv* we see a few places within the file where libuv is being leveraged. But, before we dive deeper into how all this works we need to have a basic understanding of threads.
+
+Whenever we run a program on our computer we start up something called a process. A process is an instance of the computer program that is being executed. Within a single process we can have multiple threads. Imagine a thread as a todo list that needs to be performed by the CPU of your computer. The thread is given to the CPU and the CPU attempts to run everything on it, starting at the top and working its way down. But your computer has a limited amount of resources and can only process so many instructions per second, so what do we do?
+
+  1. Add additional CPU cores to our machine. Technically one core can process multiple threads through a process called multi-threading, but the takeaway here is that *more cores === more threads* being simultaneously processed. 
+
+  2. More closely examine the work that is being performed within each thread.
+ 
+Clearly, option 2 is a much more realistic solution to our processing problem than throwing cores at it, but how do we achieve this? Here is where the OS scheduler comes into play. The OS scheduler allows us the ability to process multiple threads simultaneously. Let's say we have *Thread 1* that wants to read a file off the file system and then count the words within it, and *Thread 2* which just has a few numbers to sum up. When *Thread 1* begins, it will ping the hard drive and then wait. Without the OS scheduler we would not move onto another thread until this work completed. But luckily the OS scheduler can detect this downtime. The scheduler says "This looks like an IO operation. This is going to take some time. While the hard drive is doing its thing, let me jump over to this other thread and get it done". Once complete, the scheduler will return to *Thread 1* read the file and finish up the word count.
+
+-- image here --
+
+How does this knowledge of threads relate to Node.js?
+
+Whenever we start a Node program on our computer Node creates a single thread and executes all of our code inside that single thread. Inside this thread is something called the event loop. You can think of the event loop as being a control structure that decides what our thread should be doing at any given point in time. This event loop is the core of every Node program and every Node program has one event loop. 
+ 
+So how does the event loop work? 
+
+For starters, when you first start your Node program the event loop does not immediately begin running. Node takes the entry file and executes all of the code within it. After the contents of the file are executed the event loop begins.
+
+We can imagine the event loop as a simple while loop, and as such it requires a break case. On each iteration the event loop checks a series of conditions in order to decide if it should continue running or exit the program: 
+
+  1. Are there any pending setTimeout, setInterval, setImmediate
+  2. Are there any pending OS task ie: http server listening for requests 
+  3. Are there any long running operations ie: calls to FS module to read a file off the hard drive
+
+We can visualize these checks with some pseudo-code.
+
+```javascript{numberLines: false}
+  const pendingTimers = [];
+  const pendingOsTasks = [];
+  const pendingOperations = [];
+
+  const shouldContinue = () => {
+    const workInProgress = [
+      ...pendingTimers,
+      ...pendingOsTasks,
+      ...pendingOperations
+    ];
+
+    if (workInProgress.length) return true;
+    else return false;
+  }
+
+  while(shouldContinue()) {
+    // event loop magic
+  }
+```
+<br/>
+
+At this point, you are probably wondering how the *pendingTimers*, *pendingOsTasks* and *pendingOperations* are pushed to the arrays within our pseudo-code. Internally, Node automatically detects when our program invokes a new timer, starts a server, or invokes an IO operation. These detections begin when the file is initially run. This is why when we start a server Node does not immediately exit to the terminal.
+
+Now that we know what decides if the event loop should continue running, let's dig into what exactly is happening within the body of the event loop. We are going to run thru this fairly quicky, but if you want to read up more, this [guide](https://nodejs.org/en/docs/guides/event-loop-timers-and-nexttick/) on the event loop/process.nextTick() offers some great insight. 
+
+The event loop runs through numerous phases:
+
+1. During the 'timers' phase setTimeout and setInterval callbacks whose thresholds are reached are executed.
+2. During the 'IO callbacks' phase IO callbacks for completed (not pending) IO are executed.
+3. During the 'polling' phase Node waits for pending IO to be completed. When an IO operation completes, it goes into the *poll event queue*. Node processes these events immediately and while doing this, new events may be enqueued. In other words, the queue starts empty, grows as pending IO completes and becomes shorter as poll events are processed. 
+
+  >The poll phase stops when one of these happens:
+
+  >A. The poll event queue is empty and one or more timers 'are ready'
+
+  >B. The poll event queue is empty and there is setImmediate work scheduled 
+  
+  >C. A system-dependent hard limit (measured in number of processed events) is met 
+    
+  >Note: In case *A* the event loop goes back to the 'timers' phase, while in case *B* or *C* it moves to the 'check' phase.
+
+4. During the 'check' phase any scheduled setImmediate work is executed.
+5. During the 'close callbacks' phase any close events are processed.
+
+So, we now know how Node runs our program in a single thread and how an instance of the event loop manages what is happening within that thread. None of this likely comes as a surprise considering the first thing that someone new to Node will learn is that Node is 'asynchronous, single threaded and non-blocking'.
+
+But, thinking a bit more about what we have learned so far about threads this means our Node program can only run on one core of our multi-core CPU. If you have a multi-core computer Node will not take advantage of that, and as a result not run our programs as fast as possible, right?
+
+Node is blazing fast, so how does it do it? Well, it turns out some of the functions that are included in the standard libraries of Node are *not* single threaded. Let me be clear here, **Node and the event loop are single threaded, but some of the library functions run outside of our event loop and outside of the single thread our program is executing in**. Let's explore this with code. 
+
+At the start of this article we talked through an example requiring the *pbkdf2* hashing method within the crypto module. Following the breadcrumbs we saw how Node takes our JavaScript code and delegates a large portion of that to the C++ side where libuv is leveraged. 
+
+Let's revisit that example. When we make that call to *pbkdf2* and that work is delegated to the C++ file, libuv makes the decision to perform that computationally intensive task outside of the event loop inside something called the thread pool. The thread pool is a series of 4 threads that can be used for executing long running operations.
+
+-- image here --
+
+By delegating to the thread pool the OS scheduler can now manage the operations performed by the CPU, giving our program a level of concurrency via multi-threading. To demonstrate let's look at an example.
+
+```javascript{numberLines: false}
+const { pbkdf2 } = require('crypto');
+const { performance } = require('perf_hooks');
+
+const start = performance.now();
+
+const loggerCb = (callNum) => {
+  return () => {
+    const time = performance.now() - start;
+    console.log(`${callNum}: ${time}`);
+  }
+} 
+
+const args = ['a', 'b', 100000, 512, 'sha512'];
+
+pbkdf2(...args, loggerCb(1));
+pbkdf2(...args, loggerCb(2));
+pbkdf2(...args, loggerCb(3));
+pbkdf2(...args, loggerCb(4));
+
+// exceeding default thread pool of 4
+pbkdf2(...args, loggerCb(5));
+```
+<br/>
+
+Notice the 5 calls to our *pbkdf2* function. Since the thread pool is a series of 4 threads that can be used for executing long running operations our first 4 calls to *pbkdf2* finish at roughly the same time. But, the fifth always seems to be last since that call exceeds our default thread pool. Keep in mind that what we are seeing is the CPU processing multiple threads at once. It does not speed up processing, it just allows for a level of concurrency to the work we are doing. 
+
+Let's pretend we have 5 long running operations that have to be run concurrently and that we cannot afford to have the fifth call finish a second+ after the others. What would we do? It turns out you can customize the thread pool with a single line of code.
+
+```
+javascript{numberLines:false}
+process.env.UV_THREADPOOL_SIZE = 5;
+```
+<br/>
+
+Now, each hash call has been assigned its own thread, and with the help of the OS scheduler the CPU can juggle all five threads simultaneously with the number of cores that are available.
+
+By now, you likely have a few questions like what other functions in Node's standard library use the thread pool, or how the thread pool fits into our event loop. 
+
+In regards to which parts of Node leverage the thread pool, the answer is OS (windows vs unix based) dependent. But, two Node libs that are OS agnostic and will always leverage the thread pool are the FS module and *some functions* with the crypto module. 
+
+In terms of where the thread pool fits into our event loop, that answer is a bit less cryptic. Remember the checks the event loop makes before deciding to continue, more specifically that *pendingOperations* array? Those pending operations represent the code/tasks that are being executed in the thread pool. You may also recall that within the event loop itself we have phase 2 that checks and invokes *IO callbacks*. Those callbacks are those enqueued after the completion of the thead pool task, in our case the *loggerCb* we are pass to the *pbkdf2* call.
+
+Libuv is a powerful part of Node.js, but what else can it do? Let's look at another example and find out. Below we are going to make a few http requests for the google homepage. 
+
+```javascript{numberLines:false}
+const https = require('https');
+const { performance } = require('perf_hooks');
+
+const start = performance.now();
+
+function makeRequest {
+  https.request('https://www.google.com', (res) => {
+    res.on('data', ()=> {});
+    res.on('end', () => 
+      console.log(performance.now() - start);
+    );
+  }).end();
+}
+
+makeRequest();
+makeRequest();
+makeRequest();
+makeRequest();
+makeRequest();
+```
+<br/>
+
+Strange, all requests complete at roughly the same time. How? This wouldn't work if libuv was leveraging the same thread pool we just saw. It turns out that just as the Node standard library has some functions that make use of the thread pool via libuv, it also has some functions that make use of OS code via libuv.
+
+It makes sense. Neither Node nor libuv have code to handle the low level operations involved in making a network request. Instead, libuv delegates the request(s) to the underlying OS. It is the OS that makes the request. Libuv delegates, then simply waits for the OS to emit a signal that a response has been received. 
+
+This is key to the performance of our Node programs. Since libuv delegates to the OS, the OS decides how to handle the process outside of our event loop, therefore not blocking our JavaScript code.
+
+Much like the thread pool, the functions that leverage this async functionality are OS specific. But we can safely say that just about everything around requests and networking are executed in this manner. In terms of where this OS async features fits into our event loop, these tasks are reflected in our *pendingOSTasks* array and similarly to the thread pool callbacks executed in phase 2. 
+
+Let's tie this all together with one last example.
+
+```javascript{numberLines:false}
+const https = require('https');
+const { pbkdf2 } = require('crypto');
+const { readFile } = require('fs'); 
+const { performance } = require('perf_hooks');
+
+const start = performance.now();
+
+makeRequest();
+
+readFile('thisFile.js', 'utf8', () => {
+  const time = performance.now() - start;
+  console.log(`FS: ${time}`);
+});
+
+createHash();
+createHash();
+createHash();
+createHash();
+
+function createHash() {
+  pbkdf2('a', 'b', 100000, 512, 'sha512', () => {
+    const time = performance.now() - start;
+    console.log(`HASH: ${time}`);
+  });
+}
+
+function makeRequest() {
+  https.request('https://www.google.com', (res) => {
+    res.on('data', ()=> {});
+    res.on('end', () => {
+      const time = performance.now() - start;
+      console.log(`HTTP: ${time}`);
+    });
+  }).end();
+}
+```
+<br/>
+
+We start off invoking the *makeRequest* function to fetch the google homepage. Next, we invoke the fs module's *readFile* method. Last, we make 4 calls to the 
+*createHash* function.
+
+Now, knowing what we do about the internals of Node.js, what order do we expect our results?
+
+Result:
+>1. HTTP request
+>2. First hash
+>3. FS callback
+>4. Rest of the hash calls
+
+But why? Let's run through this code step-by-step reflecting on what we have learned about Node so far.
+
+The first function executed is the HTTP request to fetch the google homepage. Upon invocation, Node's JS side connects to the C++ side which then delegates to libuv. Since libuv has no way to make the request it passes this work onto the OS. The script moves along and invokes the FS module's *readFile* method. At this point we again make our way over to libuv. This time libuv leverages the thread pool and places this task in position one of the four threads available to us. From there the OS scheduler manages how this task will be executed by the available CPU cores. Next, we call our *createHash* function 4 times. As we know, this will fill the remaining three positions in our thread pool. The last *createHash* call sits on the sidelines awaiting its turn to jump in the pool.
+
+By this point the HTTP request has begun and the OS scheduler is juggling the 4 threads. When the FS *readFile* task is begun by the OS scheduler, it begins the first phase which is reaching out to the hard drive to gather some stats about the file. This is done in order to know how much memory to allocate. But while reaching out to the hard drive the scheduler realizes that this is going take some time and decides that while we wait on those stats it is going to make room for some other work to be done, and drops the *readFile* task from it's thread pool position and promotes the waiting *createHash* function. Once one of the 4 hash functions finishes, the *readFile* task is moved back into the pool and the second phase of reading the file completes. From there, the OS scheduler juggles the remaining hash calls and upon completion exits the program.
+
+Now what would happen if we changed the size of our thread pool from 4 to 5? What if we dropped the thread pool size to 1? I'll leave that for you to explore.
+
+Understanding the internals of Node.js allows us to more easily debug our Node applications and write more performant code. As software engineers we should embrace the frameworks, libraries, and platforms available to us. But we should be aware that a day may come when we need to understand these abstractions and how they work under the hood. Hopefully, this post serves you well if/when that day comes.
