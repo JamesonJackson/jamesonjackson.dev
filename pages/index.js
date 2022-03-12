@@ -1,7 +1,6 @@
 import Navbar from "../components/organisms/Navbar/Navbar";
 import { posts } from "../api/getPosts";
 import { PostLink } from "../components/molecules/PostLink/PostLink";
-import SocialBar from "../components/organisms/SocialBar/SocialBar";
 
 export default function IndexPage() {
   return (
