@@ -5,7 +5,10 @@ import { PostLink } from "../components/molecules/PostLink/PostLink";
 export default function IndexPage() {
   return (
     <>
-      <Navbar/>
+      <Navbar 
+        title="DAEBOOK" 
+        subtitle="a code journal"
+      />
       
       <main>
         {
